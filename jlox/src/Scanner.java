@@ -3,6 +3,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static jdk.nashorn.internal.parser.TokenType.AND;
+
 public class Scanner {
     private final String source; // 原始的源代码
     private final List<Token> tokens = new ArrayList<>(); // 列表用于保存扫描时产生的标记
@@ -11,6 +13,30 @@ public class Scanner {
     private int start = 0; // 指向被扫描词素的第一个字符
     private int current = 0; // 指向当前正在处理的字符
     private int line = 1; // 跟踪 current 所在的源文件行数
+
+    private static final Map<String, TokenType> keywords;
+
+    static {
+        keywords = new HashMap<>();
+        keywords.put("and", TokenType.AND);
+        keywords.put("class", TokenType.CLASS);
+        keywords.put("else", TokenType.ELSE);
+        keywords.put("false", TokenType.FALSE);
+        keywords.put("for", TokenType.FOR);
+        keywords.put("fun", TokenType.FUN);
+        keywords.put("if", TokenType.IF);
+        keywords.put("nil", TokenType.NIL);
+        keywords.put("or", TokenType.OR);
+        keywords.put("print", TokenType.PRINT);
+        keywords.put("return", TokenType.RETURN);
+        keywords.put("super", TokenType.SUPER);
+        keywords.put("this", TokenType.THIS);
+        keywords.put("true", TokenType.TRUE);
+        keywords.put("var", TokenType.VAR);
+        keywords.put("while", TokenType.WHILE);
+    }
+
+
 
     Scanner(String source){
         this.source = source;
@@ -21,64 +47,64 @@ public class Scanner {
         while(!isAtEnd()){
             // 处在下一个词素的开头
             start = current;
-            scanTokens();
+            scanToken();
         }
 
-        tokens.add(new Token(EOF, "", null, line)); // 在最后附加上 EOF 标记，非必须
+        tokens.add(new Token(TokenType.EOF, "", null, line)); // 在最后附加上 EOF 标记，非必须
         return tokens;
     }
 
-    private void scanTokens(){
+    private void scanToken(){
         char c = advance();
         switch (c){
             case '(' :
-                addToken(LEFT_PAREN);
+                addToken(TokenType.LEFT_PAREN);
                 break;
             case ')' :
-                addToken(RIGHT_PAREN);
+                addToken(TokenType.RIGHT_PAREN);
                 break;
             case '{' :
-                addToken(LEFT_BRACE);
+                addToken(TokenType.LEFT_BRACE);
                 break;
             case '}' :
-                addToken(RIGHT_BRACE);
+                addToken(TokenType.RIGHT_BRACE);
                 break;
             case ',' :
-                addToken(COMMA);
+                addToken(TokenType.COMMA);
                 break;
             case '.' :
-                addToken(DOT);
+                addToken(TokenType.DOT);
                 break;
             case '-' :
-                addToken(MINUS);
+                addToken(TokenType.MINUS);
                 break;
             case '+' :
-                addToken(PLUS);
+                addToken(TokenType.PLUS);
                 break;
             case ';' :
-                addToken(SEMICOLON);
+                addToken(TokenType.SEMICOLON);
                 break;
             case '*' :
-                addToken(STAR);
+                addToken(TokenType.STAR);
                 break;
             case '!':
-                addToken(match('=') ? BANG_EQUAL : BANG);
+                addToken(match('=') ? TokenType.BANG_EQUAL : TokenType.BANG);
                 break;
             case '=':
-                addToken(match('=') ? EQUAL_EQUAL : EQUAL);
+                addToken(match('=') ? TokenType.EQUAL_EQUAL : TokenType.EQUAL);
                 break;
             case '<':
-                addToken(match('=') ? LESS_EQUAL : LESS);
+                addToken(match('=') ? TokenType.LESS_EQUAL : TokenType.LESS);
                 break;
             case '>':
-                addToken(match('=') ? GREATER_EQUAL : GREATER);
+                addToken(match('=') ? TokenType.GREATER_EQUAL : TokenType.GREATER);
                 break;
             case '/' :
                 if(match('/')){
                     // 该行为注释
                     while(peek() != '\n' && !isAtEnd()) advance(); // 继续消费字符直到行位
                 }else{
-                    addToken(SLASH);
+                    addToken(TokenType.SLASH);
                 }
                 break;
             case ' ' :
@@ -89,12 +115,71 @@ public class Scanner {
             case '\n' :
                 line++;
                 break;
+            case '"' :
+                string();
+                break;
 
             default:
-                Lox.error(line, "Unexpected character.");
+                if(isDigit(c)){
+                    number();
+                } else if(isAlpha(c)){
+                    identifier();
+                } else{
+                    Lox.error(line, "Unexpected character.");
+                }
                 break;
 
         }
+    }
+
+    private void identifier(){
+        while(isAlphaNumeric(peek())){
+            advance();
+        }
+        String text = source.substring(start, current);
+        TokenType type = keywords.get(text);
+        if(type == null){
+            type = TokenType.IDENTIFIER;
+        }
+        addToken(type);
+    }
+
+    private void number(){
+        while(isDigit(peek())){
+            advance(); // 仍在处理数字，消耗剩余的字面量
+        }
+
+        // 寻找小数部分
+        if(peek() == '.' && isDigit(peekNext())){
+            // 消耗 '.'
+            advance();
+        }
+
+        while(isDigit(peek())){
+            advance();
+        }
+
+        addToken(TokenType.NUMBER, Double.parseDouble(source.substring(start, current)));
+    }
+
+    private void string(){
+        while(peek() != '"' && !isAtEnd()){
+            if(peek() == '\n')
+                line++; // 支持多行字符串
+            advance(); // 一直消耗字符，直到 " 结束该字符串
+        }
+        if(isAtEnd()){
+            Lox.error(line, "Unterminated string.");
+            return;
+        }
+
+        // the closing "
+        advance();
+
+        // 创建标记时也产生实际的字符串，但需要剥离前后的引号
+        String value = source.substring(start + 1, current - 1);
+        addToken(TokenType.STRING, value);
+
     }
 
     // 类似有条件的 advance()，只有当前字符是正在寻找的字符时才消费
@@ -110,6 +195,25 @@ public class Scanner {
     private char peek(){
         if(isAtEnd())   return '\0';
         return source.charAt(current);
+    }
+
+    private char peekNext(){
+        if(current + 1 >= source.length()){
+            return '\0';
+        }
+        return source.charAt(current + 1);
+    }
+
+    private boolean isAlpha(char c){
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+    }
+
+    private boolean isAlphaNumeric(char c){
+        return isAlpha(c) || isDigit(c);
+    }
+
+    private boolean isDigit(char c){
+        return c >= '0' && c <= '9';
     }
 
     private boolean isAtEnd(){
